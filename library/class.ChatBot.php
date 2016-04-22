@@ -15,161 +15,164 @@ class ChatBot extends Bot
     private $bot;
 
     /**
-     * @var Conversation $conversation  Conversation object of this... well.. conversation
-     */
-    private $conversation;
-
-    /**
      * @var User $user  User object of the user interacting with this bot
      */
     private $user;
 
     /**
-     * @var bool $isNewUser  true if this is a new user and new conversation, false otherwise
+     * @var Conversation $conversation  Conversation object of this... well.. conversation
      */
-    private $isNewUser = false;
+    private $conversation;
 
     /**
-     * @var array $keywords  Array of keywords within groups of keywords
+     * @var Message $lastMessageSent  The last message the bot sent to the user
      */
-    private $keywords;
+    private $lastMessageSent;
 
     /**
-     * @var array $replys  Array of replys for each keyword
+     * @var array $keywordArray  Array of keyphrase to search for in the message
      */
-    private $replys;
+    private $keywordArray;
+
+    /**
+     * @var array $responseArray  Array of responses mapped to each keyphrase
+     */
+    private $responseArray;
+
+    /**
+     * @var Message $message  The message sent to the bot
+     */
+    private $message;
 
     /**
      * Default personaility is Fabio
      *
-     * @var array $replys  Array of replys for each keyword
+     * @var string $botVersion  The Bot's version
+     * @var string $botIp  The Bot's IP address
+     * @var string $userUserAgent  The user's user agent
+     * @var string $userIp  The user's IP address
+     * @var string $personality  The Bot's personality
      */
-    function __construct($botVersion, $botIp, $userUserAgent, $userIp, $personality = 'fabio')
+    function __construct($botVersion, $botIp, $userUserAgent, $userIp, $personality = 'mikey')
     {
-        // get this bots user info
-        // if bot is not found, create a new user for it
+        // get this bots user info, if bot is not found, create a new user for it
         try {
             $this->bot = $this->getUserTable()->getUserByDescription($botVersion, $botIp);
         } catch (Exception $e) {
-            try {
-                $this->bot = $this->getUserTable()->createUser($botVersion, $botIp, ucfirst($personality));
-            } catch (Exception $e) {
-                die($e->getMessage()."\n"); // can't create user
-            }
+            $this->bot = $this->getUserTable()->createUser($botVersion, $botIp, ucfirst($personality));
         }
-        // get this user's user info
-        // if this user is new, create a new user
+        // get this user's user info, if this user is new, create a new user
         try {
             $this->user = $this->getUserTable()->getUserByDescription($userUserAgent, $userIp);
         } catch (Exception $e) {
-            try {
-                $this->isNewUser = true;
-                // default name is friend
-                $this->user = $this->getUserTable()->createUser($userUserAgent, $userIp, 'friend');
-            } catch (Exception $e) {
-                die($e->getMessage()."\n"); // can't create user
-            }
+            $this->user = $this->getUserTable()->createUser($userUserAgent, $userIp, 'friend');
         }
-        // get this conversation
-        // if this conversation does not exist, create a new one
+        // get this conversation, if this conversation does not exist, create a new one
         try {
             $this->conversation = $this->getConversationTable()->getConvoByUsers($this->bot, $this->user);
         } catch (Exception $e) {
-            try {
-                // default name is friend
-                $this->conversation = $this->getConversationTable()->createConvo($this->bot, $this->user);
-            } catch (Exception $e) {
-                die($e->getMessage()."\n"); // can't create conversation
-            }
+            $this->conversation = $this->getConversationTable()->createConvo($this->bot, $this->user);
         }
-        $this->keywords = require PERSONALITIES.$personality.'/keywords.php';
-        $this->replys = require PERSONALITIES.$personality.'/replys.php';
+        // get the last message the bot sent
+        try {
+            $this->lastMessageSent = $this->getMessageTable()->getLastMessageSent($this->bot, $this->conversation);
+        } catch (Exception $e) {} //do nothing if there are no older messages sent
+        $this->keywordArray = require PERSONALITIES.$personality.'/keyphrases.php';
+        $this->responseArray = require PERSONALITIES.$personality.'/responses.php';
     }
 
+    /**
+     * Recursively loop through all keyphrases and set the response to the matched keyphrase.
+     * Set the response and key
+     *
+     * @var array $arr  Array of keyphrases to loop through
+     * @var array $keys  Array of keys from the looping array to keep track of how deep we are in the array
+     * @return string $key  The key of the array the keyphrase was in
+     */
+    private function searchKeywords(&$arr, &$keys = array())
+    {
+        foreach ($arr as $key => $value) {
+            if (is_array($value)) {
+                array_push($keys, $key);
+                $result = $this->searchKeywords($value, $keys);
+                if ($result)
+                    return $result;
+            } else {
+                if (preg_match('/\b'.$value.'\b/i', $this->message->message) == 1) {
+                    $str = '$response = $this->responseArray'; // create a sting of the array so we can get the corresponding response
+                    foreach ($keys as $key) {
+                        $str .= '[\''.$key.'\']';
+                    }
+                    $str .= ';';
+                    eval($str); // $response = $this->responseArray['key_1']['key_2']...['key_n']
+                    $returnArray =  array(
+                        'key_tree' => $keys,
+                        'nearest_key' => $key,
+                        'keyphrase' => $value,
+                        'response' => $response[mt_rand(0, count($response) - 1)], // choose a random response from the array
+                    );
+                    return $returnArray;
+                }
+            }
+        }
+        array_pop($keys); // remove last stored $key because we didnt find a match in this array
+    }
 
     /**
-     * Generate a reply to a message
+     * Generate a response to a message
      *
-     * @var string $message  Message for ChatBot to reply to
-     * @return string $reply  Reply generated
+     * @var string $message  Message for ChatBot to response to
+     * @return string $response  Reply generated
      */
     public function generateReply($message)
     {
         // save message first
-        try {
-            $message = $this->getMessageTable()->saveMessage($this->conversation, $this->user, $message);
-        } catch (Exception $e) {
-            die($e->getMessage()."\n"); // can't save message
-        }
-        // check if this is a new user
-        if ($this->isNewUser) {
-            // we dont know who they are so ask for their name
-            $reply = $this->replys['ask_name'][mt_rand(0, count($this->replys['ask_name']) - 1)];
-        }
-        // check if we asked their name
-        if (!isset($reply)) {
-            if ($this->user->name == 'friend') {
-                // make sure we just asked for their name
-                if (in_array($this->getMessageTable()->getLastMessageSent($this->bot, $this->conversation)->message, $this->replys['ask_name'])) {
-                    // assume this message is them replying with their name, so save the first word as their name
-                    if (strpos(trim($message->message), ' ') >= 0) { // check for any spaces (maybe they said somehting after)
-                        $this->user->name = explode(' ', trim($message->message))[0]; // update user's name to the first word, trimming any whitespace
-                    } else {
-                        $this->user->name = trim($message->message);
-                    }
-                    // save user's new name in database
-                    try {
-                        $this->user = $this->getUserTable()->updateUser($this->user); 
-                    } catch (Exception $e) {
-                        die($e->getMessage()."\n");
-                    }
-                    $reply = 'Nice to meet you, '.$this->user->name;
+        $this->message = $this->getMessageTable()->saveMessage($this->conversation, $this->user, $message);
+        // check if this is a new user/conversation
+        if ($this->user->isNew) {
+        // we dont know who they are so ask for their name
+            $reply = $this->responseArray['to_ask']['get_user_name'][mt_rand(0, count($this->responseArray['to_ask']['get_user_name']) - 1)];
+        } elseif (($questionGroup = $this->lastMessageSent->isQuestion($this->responseArray['to_ask'], $this->lastMessageSent)) !== false) { // check if we asked a question and are waiting for the user's response
+            switch ($questionGroup) {
+                case 'get_user_name':
+                    $parts = explode(' ', $this->message->message);
+                    $this->user->name = ucfirst(end($parts)); // get last word of sentence and use that as their name! yay! guessing!
+                    $this->user = $this->getUserTable()->updateUser($this->user);
+                    break;
+            }
+            $reply = $this->responseArray['respond_to_ask'][$questionGroup][mt_rand(0, count($this->responseArray['respond_to_ask'][$questionGroup]) - 1)];
+        } else {
+            // check for keywords and response based on that
+            foreach ($this->keywordArray as $key => $val) {
+                if (!$responseInfo) {
+                    $key = array($key);
+                    $responseInfo = $this->searchKeywords($val, $key);
+                } else {
+                    break;
                 }
             }
-        }
-        // check if user asked to be deleted
-        if (!isset($reply)) {
-            if (preg_match('/[forget|delete|remove][ about]* me/i', $message->message) == 1) {
-                $this->getUserTable()->deleteUser($this->user);
-                return $this->replys['removal'][mt_rand(0, count($this->replys['removal']) - 1)];
-            }
-        }
-        // check if user is telling us their name
-        if (!isset($reply)) {
-            if (preg_match('/call me |my name is /i', $message->message) == 1) {
-                $reply = 'Well you told me you name is '.$this->user->name;
-                $parts = explode(' ', $message->message);
-                $this->user->name = end($parts); // get last word of sentence and use that as their name! yay! guessing!
-                // save user's new name in database
-                try {
-                    $this->user = $this->getUserTable()->updateUser($this->user); 
-                } catch (Exception $e) {
-                    die($e->getMessage()."\n");
-                }
-                $reply .= ', but I guess I will call you '.$this->user->name.' instead!';
-            }
-        }
-        // check for keywords and reply based on that
-        if (!isset($reply)) {
-            foreach ($this->keywords as $groupName => $groupArray) {
-                foreach ($groupArray as $keyword) {
-                    if (preg_match('/'.$keyword.'/i', $message->message) == 1) {
-                        $reply = $this->replys[$groupName][$keyword][mt_rand(0, count($this->replys[$groupName][$keyword]) - 1)];
+            if ($responseInfo) {
+                $reply = $responseInfo['response'];
+                switch ($responseInfo['nearest_key']) {
+                    case 'remove_user':
+                        $this->getUserTable()->deleteUser($this->user);
+                        return $reply; // return early here because there is nothing else to do. We will not save this reply since convo has been deleted along with user
                         break;
-                    }
+                    case 'update_user_name':
+                        $parts = explode(' ', $this->message->message);
+                        $this->user->name = end($parts); // get last word of sentence and use that as their name! yay! guessing!
+                        $this->user = $this->getUserTable()->updateUser($this->user);
+                        break;
+                }
+            } else {
+                // could not find any keywords, choose a random response
+                if (!isset($reply)) {
+                    $reply = $this->responseArray['randoms'][mt_rand(0, count($this->responseArray['randoms']) - 1)];
                 }
             }
         }
-        // if all else fails, choose a random reply
-        if (!isset($reply)) {
-            $reply = $this->replys['randoms'][mt_rand(0, count($this->replys['randoms']) - 1)];
-        }
-        // save bot's reply
-        try {
-            $reply = $this->getMessageTable()->saveMessage($this->conversation, $this->bot, $reply);
-        } catch (Exception $e) {
-            die($e->getMessage()."\n"); // can't save message
-        }
-        return $reply->message;
+        // save bot's response
+        $reply = $this->getMessageTable()->saveMessage($this->conversation, $this->bot, $reply)->message;
+        return $reply;
     }
 }

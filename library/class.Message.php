@@ -41,12 +41,30 @@ class Message
      * @param string $message  The message
      * @param string $timestamp  Timestamp of the message
      */
-    function __construct($id, $conversationId, $userId, $message, $timestamp)
+    function __construct($id = 0, $conversationId = 0, $userId = 0, $message = '', $timestamp = '')
     {
         $this->id = (int)$id;
         $this->conversationId = (int)$conversationId;
         $this->userId = (int)$userId;
         $this->message = $message;
         $this->timestamp = $timestamp;
+    }
+
+    /**
+     * Search an array of questions to see if the last message sent by the bot was a question
+     *
+     * @param array $questions  Array of groups of question that can be asked
+     * @param Message $lastMessagesaved  Object of the last message the bot sent
+     * @return bool | string   Return the key if a match was found, false otherwise
+     */
+    public function isQuestion($questions, $lastMessageSent) {
+        foreach ($questions as $group => $arr) {
+            foreach ($arr as $key => $question) {
+                if ($question == $lastMessageSent->message) {
+                    return $group;
+                }
+            }
+        }
+        return false;
     }
 }

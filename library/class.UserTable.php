@@ -70,7 +70,7 @@ class UserTable extends Database
      * @param string $userAgent  User Agent of the user, or if bot, version of the bot
      * @param string $ip  IP address of the user or bot
      * @param string $name  Name of the person or bot
-     * @return User  User object of the new user created
+     * @return User $user  User object of the new user created
      */
     public function createUser($userAgent, $ip, $name)
     {
@@ -82,7 +82,9 @@ class UserTable extends Database
         if (!$result) {
             throw new Exception('Could not create user');
         }
-        return $this->getUserByDescription($userAgent, $ip);
+        $user = $this->getUserByDescription($userAgent, $ip);
+        $user->isNew = true;
+        return $user;
     }
 
     /**

@@ -30,6 +30,11 @@ class User
     public $name;
 
     /**
+     * @var bool $isNew  true if the user is new, false otherwise
+     */
+    public $isNew = false;
+
+    /**
      * @param int $id  User's ID
      * @param string $userAgent  User Agent of the user, or if the user is the bot, the version of the bot
      * @param string $ipAddress  User's IP address
